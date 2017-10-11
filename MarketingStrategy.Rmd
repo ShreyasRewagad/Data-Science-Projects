@@ -1,0 +1,302 @@
+---
+title: "Marketing Campaign Strategy"
+author: "Shreyas Rewagad"
+---
+# Loading the necessary Libraries
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+
+require(plyr)
+require(ROCR)
+require(corrplot)
+require(caret)
+require(ggplot2)
+require(reshape2)
+require(GGally)
+require(lattice)
+require(DMwR)
+require(caret)
+require(pROC)
+require(rpart)
+require(rattle)
+require(rpart.plot)
+require(RColorBrewer)
+require(randomForest)
+require(xgboost)
+require(randomForest)
+
+```
+
+# Reading the data into R
+Reading the data into R and getting a brief idea about it.
+Looking at the attributes/features available to us.
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+Data <- read.csv("training.csv",stringsAsFactors = F,na.strings = c(""))
+head(Data)
+str(Data)
+summary(Data)
+```
+
+# Checking whether our Dataset is balanced
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+prop.table(table(Data$responded))
+```
+We can see that the classes are not balanced. We this would cause over-fitting and tend to favor towards the class "no".
+
+# Distinguishing the type of attributes/variables
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+Data$custAge <- as.numeric(Data$custAge)
+Data$profit <- as.numeric(Data$profit)
+Data$id <- NULL
+
+NUM <- names(which(sapply(Data, is.numeric))) 
+CAT <- setdiff(names(Data),NUM)
+
+stopifnot(length(NUM) + length(CAT) == ncol(Data))
+```
+
+# Checking Whether the dataset has any missing values.
+If the % of missing values exceed 25% then I'm planning to remove that particular attribute.
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+Know.Missing <- function(Data){
+Null.Percent <- round(apply(Data, 2, function(x) length(which(x == "" | is.na(x) | x == "NA"))/length(x))*100,3)
+Null.Percent <- Null.Percent[Null.Percent>0]
+Null.Percent}
+Know.Missing(Data)
+```
+
+# Imputing the missing values
+Categorical variables are generally imputed by their modes, in our case day of week consists of ~ 10% missing values. We impute it by mode.
+But we should not do the same for Schooling as it consists of nearly 30% missing values. Hence, removing "schooling". 
+Profiles for non-res ponders are 0 hence imputing them in such manner.
+customer age does not show normal distribution and hence we need to use median to impute it.
+
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+#imputing day of the week by mode.
+Imp.Mode <- names(sort(table(Data$day_of_week), decreasing = TRUE)[1])
+#Data[is.na(Data$day_of_week), 'day_of_week'] <- Imp.Mode
+Data$day_of_week[Data$day_of_week == "NA"] <- Imp.Mode
+
+Data$profit[Data$responded== 'no']<-0 # for the customers who haven't responded are assigned 0 profit
+Profit <- Data$profit
+Data$profit <- NULL
+
+Data$schooling <- NULL
+Data$custAge[is.na(Data$custAge)] <- median(Data$custAge,na.rm = T)
+
+stopifnot(length(Know.Missing(Data))==0)
+```
+
+# Check the Co-relation between the attributes
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE,fig.height=10,fig.align="center",fig.width=10}
+my_fn <- function(data, mapping, ...){
+  p <- ggplot(data = data, mapping = mapping) + 
+    geom_point() + 
+    geom_smooth(method=loess, fill="red", color="red", ...) +
+    geom_smooth(method=lm, fill="blue", color="orange", ...)
+  p
+}
+Data.relation <- Data[ ,names(which(sapply(Data, is.numeric)))]
+Data.relation$response <- ifelse(Data$responded == "yes",1,0)
+g = ggpairs(Data.relation, lower = list(continuous = my_fn)) + theme(text = element_text(size=10))
+g
+```
+
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+BestModel <- function(true, predict){
+con=data.frame(predict,true)
+tp=nrow(subset(con,true==1 & predict==1))
+tn=nrow(subset(con,true==0 & predict==0))
+fp=nrow(subset(con,true==0 & predict==1))
+fn=nrow(subset(con,true==1 & predict==0))
+precision = tp / (tp + fp)
+recall = tp / (tp + fn)
+cat("Model Statistics:")
+cat("\nPrecision: ",precision)
+cat("\nRecall: ",recall)
+}
+```
+
+# Implement stratified sampling
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+Data[sapply(Data, is.character)] <- lapply(Data[sapply(Data, is.character)],as.factor)
+index.Train <- createDataPartition(y = Data$responded, p = .75, list = FALSE)
+Data.Train <- Data[index.Train,]
+Data.Test <- Data[-index.Train,]
+stopifnot(nrow(Data.Test) + nrow(Data.Train) == nrow(Data))
+```
+
+# Decision Tree
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+set.seed(415)
+ctrl = rpart.control(method = "cv", number = 5)
+model_DT <- rpart(responded ~ ., data = Data.Train, method = "class")
+
+pred_DT <- predict(model_DT, Data.Test, type = "class")
+confusionMatrix(reference = Data.Test$responded , data = pred_DT)
+plot(roc(Data.Test$responded, ifelse(pred_DT=="yes",1,0)), print.auc = TRUE)
+```
+
+# Random Forest
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+set.seed(415)
+model_RF <- randomForest(responded ~ ., data = Data.Train, importance = TRUE, ntree = 30)
+pred_RF <- predict(model_RF, Data.Test)
+
+varImpPlot(model_RF)
+confusionMatrix(reference = Data.Test$responded, data = pred_RF)
+
+plot(roc(Data.Test$responded, ifelse(pred_RF=="yes",1,0)),print.auc = TRUE)
+```
+
+# XGBoost
+Converting into dummy
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+NUM <- names(which(sapply(Data, is.numeric))) 
+CAT <- setdiff(names(Data),NUM)
+ohe_feats = c(CAT)# One-Hot-Encoding
+
+dummies <- dummyVars(~ profession + marital + default + housing + loan + contact + month + day_of_week + poutcome, data = Data)
+Data.OHE <- as.data.frame(predict(dummies, newdata = Data))
+
+Data.OHE.all <- cbind(Data.OHE,Data[NUM])
+
+labels <- ifelse(Data$responded=="yes",1,0)
+```
+
+combining and sampling the data-frame
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+index.Train <- createDataPartition(y = labels, p = .75, list = FALSE)
+Data.Train <- Data.OHE.all[index.Train,]
+Data.Test <- Data.OHE.all[-index.Train,]
+Train.labels <- labels[index.Train]
+Test.labels <- labels[-index.Train]
+stopifnot(nrow(Data.Test) + nrow(Data.Train) == nrow(Data))
+stopifnot(length(Train.labels) + length(Test.labels) == length(labels))
+# Check the difference
+#stopifnot(sum(Data.Test$responded)/nrow(Data.Test)-sum(Data.Train$responded)/nrow(Data.Train)<.15)
+```
+
+Running XGBoost
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+
+set.seed(150)
+xgb <- xgboost(data = data.matrix(Data.Train), label = Train.labels, max_depth = 3,
+                   eta = 1, nthread = 2, nrounds = 2, objective = "binary:logistic",verbose = F)
+pred <- ifelse(predict(xgb, data.matrix(Data.Test))>0.5,1,0)
+roc(Test.labels,pred)
+
+confusionMatrix(reference = Test.labels, data = pred)
+```
+# Feature Selection using LASSO
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+set.seed(2)
+new.Data <- Data.OHE.all
+new.Data$responded <- labels
+con <- trainControl(method = "cv", number = 10)
+model_lasso <- train(responded ~ ., data = new.Data, method = "lasso", trControl = con)
+print(paste0("Best Tuning paremeter:", model_lasso$bestTune$fraction))
+imp_features <- predictors(model_lasso)
+cat("# features selected ",length(imp_features),"/",ncol(new.Data))
+```
+
+# SMOTE the data and implementing stratified sampleing
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+Data.SMOTE <- SMOTE(responded ~ ., Data, perc.over = 100, perc.under=200)
+cat("balancing the classes\n",prop.table(table(Data.SMOTE$responded)))
+index.Train <- createDataPartition(y = Data.SMOTE$responded, p = .75, list = FALSE)
+Data.Train <- Data[index.Train,]
+Data.Test <- Data[-index.Train,]
+stopifnot(nrow(Data.Test) + nrow(Data.Train) == nrow(Data))
+```
+
+# Decision Tree
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+set.seed(415)
+ctrl = rpart.control(method = "cv", number = 5)
+model_DT <- rpart(responded ~ ., data = Data.Train, method = "class")
+
+pred_DT <- predict(model_DT, Data.Test, type = "class")
+confusionMatrix(reference = Data.Test$responded , data = pred_DT)
+plot(roc(Data.Test$responded, ifelse(pred_DT=="yes",1,0)), print.auc = TRUE)
+```
+
+# Random Forest
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+set.seed(415)
+model_RF <- randomForest(responded ~ ., data = Data.Train, importance = TRUE, ntree = 3000)
+pred_RF <- predict(model_RF, Data.Test)
+
+varImpPlot(model_RF)
+confusionMatrix(reference = Data.Test$responded, data = pred_RF)
+
+plot(roc(Data.Test$responded, ifelse(pred_RF=="yes",1,0)),print.auc = TRUE)
+```
+
+# XGBoost
+Converting into dummy
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+NUM <- names(which(sapply(Data.SMOTE, is.numeric))) 
+CAT <- setdiff(names(Data.SMOTE),NUM)
+labels <- ifelse(Data.SMOTE$responded=="yes",1,0)
+ohe_feats = setdiff(CAT,c("responded"))# One-Hot-Encoding
+
+dummies <- dummyVars(~ profession + marital + default + housing + loan + contact + month + day_of_week + poutcome, data = Data.SMOTE)
+Data.OHE <- as.data.frame(predict(dummies, newdata = Data.SMOTE))
+
+Data.OHE.all <- cbind(Data.OHE,Data.SMOTE[NUM])
+```
+
+combining and sampling the data-frame
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+index.Train <- createDataPartition(y = labels, p = .75, list = FALSE)
+Data.Train <- Data.OHE.all[index.Train,]
+Data.Test <- Data.OHE.all[-index.Train,]
+Train.labels <- labels[index.Train]
+Test.labels <- labels[-index.Train]
+stopifnot(nrow(Data.Test) + nrow(Data.Train) == nrow(Data.OHE.all))
+stopifnot(length(Train.labels) + length(Test.labels) == length(labels))
+# Check the difference
+#stopifnot(sum(Data.Test$responded)/nrow(Data.Test)-sum(Data.Train$responded)/nrow(Data.Train)<.15)
+```
+
+Running XGBoost
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+
+set.seed(150)
+xgb <- xgboost(data = data.matrix(Data.Train), label = Train.labels, max_depth = 3,
+                   eta = 1, nthread = 2, nrounds = 2, objective = "binary:logistic",verbose = F)
+pred <- ifelse(predict(xgb, data.matrix(Data.Test))>0.5,1,0)
+roc(Test.labels,pred)
+
+confusionMatrix(reference = Test.labels, data = pred)
+```
+
+Data|Model|Precision|Recall
+----|-----|---------|------
+Unbalanced|Decision Tree|0.9103|0.9885
+Unbalanced|Random Forest|0.9186|0.9633
+Unbalanced|XGBoost|0.9245|0.9826
+Balanced|Decision Tree|0.9103|0.9885
+**Balanced**|**Random Forest**|**0.9151**|**0.9756**
+Balanced|XGBoost|0.7768|0.7953
+
+```{r,message=FALSE,tidy=TRUE,error=FALSE,warning=FALSE}
+TEST <- read.csv("testingCandidate.csv",stringsAsFactors = F,na.strings = c(""))
+TEST$custAge <- as.numeric(TEST$custAge)
+Imp.Mode <- names(sort(table(TEST$day_of_week), decreasing = TRUE)[1])
+TEST$day_of_week[TEST$day_of_week == "NA"] <- Imp.Mode
+TEST$custAge[is.na(TEST$custAge)] <- median(TEST$custAge,na.rm = T)
+TEST[sapply(TEST, is.character)] <- lapply(TEST[sapply(TEST, is.character)],as.factor)
+
+str(TEST)
+
+
+model_RF <- randomForest(responded ~ ., data = Data.SMOTE, importance = TRUE, ntree = 3000)
+TEST$response<- predict(model_RF, TEST)
+
+profit = 142.11*sum(ifelse(TEST$response=="yes",1,0))
+
+cat("PROFIT from our campaign",profit)
+
+write.csv(TEST,file = "testingCandidate.csv")
+```

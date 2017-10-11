@@ -1,0 +1,233 @@
+---
+title: "Exploratory Data Analysis of the Kaggle Human Resource data."
+author: "Shreyas Rewagad"
+output: pdf_document
+---
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+require(readr)
+require(ggplot2)
+require(GGally)
+require(data.table)
+HR_Data <- fread('https://storage.googleapis.com/kaggle-datasets/358/951/HR_comma_sep.csv?GoogleAccessId=datasets@kaggle-161607.iam.gserviceaccount.com&Expires=1508002970&Signature=gHwLVC%2FWd6n2y0vArFFc%2BHqzOmqwe9K%2B9F5NdwbQwBIC%2BwtUIISSyHcUWO3NWgxhMCElPlvMp9iNUyblTHY7UKc6hgqBuwGVtGTWa89uHt7CCafBUCipDqOisOksTnink5oAHptHDTrWiMmUAKu4PlmD%2BxSRiNAeaKUZ7YESX4bF5TDxnOdUaP7Hd0sWNui9bi3hFi2Lc78oPIJPahntVAEq6YkGv7tqZF8VlWTNO2vLV5l7v%2FWrmNDDssKLpRxMY%2FA1LKeSCkjTdJId2gaKshNYhtQ5IMsiqe0l5LqXy9rL3DbsHXYEdwfnJEZl14JrveLwEjb%2FkEm9ide1JwnEog%3D%3D')
+```
+
+
+# Abstract
+
+Today, in the data science industry, people are your real assets and it is important to treat them right so you can retain the necessary talent needed for your company's growth. By the means of churn analysis, you can identify the pain points people have, identify the employees who are at risk of churning out and take necessary steps to retain them. 
+
+
+This data-set tracks the attributes (such as salary, number of projects assigned and many more) of employees in a particular firm. This firm wants to find out what is the reason behind employees getting churned prematurely and that is what the EDA is about.
+
+# Data description
+
+1. Employee **satisfaction level** is the satisfaction rating given by an employee regarding job satisfaction and it ranges between 0 and 1
+
+2. **Last evaluation** is the performance rating received in previous evaluation and it ranges between 0 and 1
+
+3. **Number of projects** undertaken by the employee during his tenure
+
+4. **Average monthly hours** worked by the employee
+
+5. **Time spent at the company** in years
+
+6. Whether or not the employee had a **work accident** while serving at this particular company (binary)
+
+7. Whether or not did the employee was awarded a **promotion in last 5 years** (binary)
+
+8. The **department** the employee belongs to
+
+9. The **salary** range an employee belongs to (high/med/low) 
+
+10. Whether the employee has **left** or not (class label)
+
+\newpage
+
+# Data at a glance
+Summary of continuous variables
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+temp<-data.frame(HR_Data$satisfaction_level,HR_Data$last_evaluation,HR_Data$number_project,HR_Data$average_montly_hours,HR_Data$time_spend_company)
+summary(temp)
+```
+Work accident (1=had work accident)
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+table(HR_Data$Work_accident)
+```
+Salary wise employee spread
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+table(HR_Data$salary)
+```
+Department wise employee spread
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+table(HR_Data$Department)
+```
+Promotion in last 5 years? (1=yes,0=no)
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+table(HR_Data$promotion_last_5years)
+```
+Did the employee quit? (1=yes,0=no)
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+table(HR_Data$left)
+```
+
+\newpage
+
+Now let's see if we can find some pattern in the employee performance and the amount of hours worked by the employee.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+nums <- which(sapply(HR_Data,is.numeric))
+HR.Numeric <- HR_Data[ , nums, with=FALSE]
+
+my_fn <- function(data, mapping, ...){
+  p <- ggplot(data = data, mapping = mapping) + 
+    geom_point() + 
+    geom_smooth(method=loess, fill="red", color="red", ...) +
+    geom_smooth(method=lm, fill="blue", color="orange", ...)
+  p
+}
+
+g = ggpairs(HR.Numeric, lower = list(continuous = my_fn))
+g
+```
+From the above correlations plot, we do not observe any strong correlations among the explanatory variables. However, we do observe some relations between explanatory variables and the response variable(left) which are list as follows:    
+- Employee satisfaction level seems to have the greatest negative impact on the probability of leaving.  
+- Work accident seems to have second most negative impact on the probability of leaving. This seems counter-intuitive and has been further explored in the plots that follow.   
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+HR_Data$salary_f = factor(HR_Data$salary, levels=c('low','medium','high'))
+ggplot(HR_Data,aes(x=last_evaluation,y=average_montly_hours,col=factor(left)))+ geom_point(alpha = 0.5) + facet_wrap(~factor(salary_f))+ylab("Average monthly hours worked")+ xlab("Last evaluation rating")
+```
+
+We see that there is quite high churn in the med/low salary bucket as compared to high salary bucket. This is very intuitive since the employees at the higher positions seldom switch companies as compared to low or mid level employees.
+
+In the mid and low salary buckets, we see two major cluster.
+
+1. First is at the bottom left, employees who have less number of hours worked on average and who aren't good performers either. Probably they are not interested in this job and lack motivation. 
+2. Second cluster is at top right corner, these are high skilled employees that are working for a lot more number of hours. Identifying these employees and stopping them from churning is the key.
+
+Evaluation and work hours, time spent
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+ggplot(HR_Data,aes(x=last_evaluation,y=average_montly_hours,color=factor(left)))+geom_point(alpha=0.5)+geom_jitter()+facet_wrap(~Work_accident)+ ggtitle("Average monthly hrs vs Last Evaluation wrt Work Accident")
+```
+In the above plot we see 2 major clusters(representing employees who left the company):  
+- The first cluster represents churned employees with low last evaluation and who have worked less number of average monthly hours. These employees are not of much importance to the company and hence won't be the focus of our analysis.  
+- The second clusters represents churned employees with high last evaluation and who have worked less number of average monthly hours. Based on further graphs, we will try to determine their reasons for leaving.  
+
+Surprisingly, of the employees who have had a work accident, very few have left the company. This seems counter-intuitive but we speculate that these employees may have received good compensation or additional benefits and hence might have chosen to stay.    
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+ggplot(HR_Data,aes(x=satisfaction_level,y=Work_accident,color=factor(left)))+geom_point(alpha=0.5)+geom_jitter()+facet_wrap(~promotion_last_5years)+ ggtitle("Satisfaction Level hrs vs Work Accident wrt Promotion Last 5 years")
+```
+From the above plot, we observe that employees who have received a promotion in the last five years are less likely to leave.  
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+ggplot(HR_Data,aes(x=time_spend_company,y=last_evaluation,color=factor(left)))+geom_point(alpha=0.5)+geom_jitter()+facet_wrap(~promotion_last_5years)+ ggtitle("Last Evaluation vs  Time spent in Company wrt Promotion Last 5 years")
+```
+In this plot, we observe that there is almost no evidence of employees(who have worked with the company for more than approximately 7 years) leaving the company.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+ggplot(HR_Data,aes(x=last_evaluation,y=average_montly_hours,color=factor(left)))+geom_point(alpha=0.5)+geom_jitter()+facet_wrap(~cut(time_spend_company,3)*salary_f)+ ggtitle("Average monthly hrs vs Last Evaluation wrt Time Spend in Company and Salary")
+```
+This plot bolsters our inference from the previous plot that there is no evidence of employees with experience greater than 7 years, leaving the company.  
+Another major observation is the cluster of churned employees with mid-range experience and in low and medium salary brackets. This cluster is formed around high average monthly hours worked and high last evaluation. These employees may have left because they are not satisfied with their salary compensation.  
+We also see very less employees with salaries in the high bracket having left the company.  
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+ggplot(HR_Data,aes(x=last_evaluation,y=satisfaction_level,color=factor(left)))+geom_point()+geom_jitter()+facet_wrap(~cut(time_spend_company,3)*salary)
+```
+This plot further bolsters our inferences about sparsity of churned employee data points in the high salary bracket and for employees with experience of more than approximately 7 years with the company.  
+Additionally, we see major clusters of churned employee data points in low and medium salary brackets which defer based on experience range.  
+- In the two to four year experience range, we see clusters around low and medium satisfaction levels along with low and high last evasions respectively. The reasons for these employees leaving may be low job satisfaction or low salary compensation despite higher last evaluations.  
+
+- In the four to seven year experience range, we see clusters around high and low satisfaction levels coupled with high last evaluations. The reason for the these employees' leaving may be either low job satisfaction(for cluster around low satisfaction level and high last evaluations) or may be less than satisfactory salary compensation(for cluster around high satisfaction level and high last evaluation).  
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+ggplot(HR_Data,aes(x=time_spend_company,y=left)) + geom_jitter(height = 0.1, width = 0.25) + geom_smooth(method = "glm", method.args = list(family = "binomial")) + facet_wrap(~salary_f)
+```
+  
+In this plot we see that probability of leaving is directly proportional to the time spent in the company except for in the high salary bracket. However the slope of the curve gets steeper as we move from medium salary bracket to the lower one. For high salary bracket the probability is almost constant.  
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+ggplot(HR_Data,aes(x=average_montly_hours,y=left)) + geom_jitter(height = 0.1, width = 0.25) + geom_smooth(method = "glm", method.args = list(family = "binomial")) + facet_wrap(~salary_f)
+```
+In this plot we can observe that the probability of leaving is directly proportional but not strongly related to average monthly hours worked by the employee.The slope of the curve is similar for both low & medium salary bracket. The lowest probability of leaving for employees goes on increasing as we move from higher salary brackets to lower ones.  
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+ggplot(HR_Data,aes(x=satisfaction_level,y=left)) + geom_jitter(height = 0.1, width = 0.25) + geom_smooth(method = "glm", method.args = list(family = "binomial")) + facet_wrap(~salary_f)
+```
+
+In this plot we can observe that the probability of leaving is inversely proportional to satisfaction level of the employee.The slope of the curve is similar across all the salary brackets. However, the maximum probability of leaving for high salary bracket is pretty low when compared to the other two salary brackets.  
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+ggplot(HR_Data,aes(x=last_evaluation,y=left)) + geom_jitter(height = 0.1, width = 0.25) + geom_smooth(method = "glm", method.args = list(family = "binomial")) + facet_wrap(~salary_f)
+```
+
+In this plot we can observe that the probability of leaving is almost constant across all last evaluation scores for all salary brackets . But the probability decreases as their salary bracket decreases.
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+ggplot(HR_Data,aes(x=number_project,y=left)) + geom_jitter(height = 0.1, width = 0.25) + geom_smooth(method = "glm", method.args = list(family = "poisson")) + facet_wrap(~salary_f)
+overdispersion = sum()
+```
+
+In this plot we can observe that the probability of leaving is directly proportional but very weakly related to the number of projects done by the employee.The slope of the curve is similar for both low & medium salary bracket. But For higher salary bracket the probability is inversely proportional to the number of projects done by employees.  
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+ggplot(HR_Data,aes(x=satisfaction_level,y=left)) + geom_jitter(height = 0.1, width = 0.25) + geom_smooth(method = "glm", method.args = list(family = "binomial")) + facet_wrap(~cut(last_evaluation,3)+salary_f)+ggtitle("Left vs Satisfaction Level wrt Last Evaluation and Salary")
+```
+The smooth curves change as the experience ranges change. But, across each experience range, the curves are almost identical for low and medium salary brackets but different from that of high salary bracket.  
+
+
+Let's build a model using last evaluation, average monthly hours and salary as our predictors:
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+m1<-glm(left ~ last_evaluation + average_montly_hours + factor(salary), 
+        family = binomial, 
+        data = HR_Data)
+summary(m1)
+```
+
+
+
+
+Let's check the residual plot of this model to see if this model is a good fit for the data.
+
+\newpage
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+m1.df = HR_Data
+m1.df$.fitted = fitted.values(m1)
+m1.df$.resid = residuals(m1, type = "response")
+ggplot(m1.df, aes(x = .fitted, y = .resid)) + geom_point() + geom_smooth(method = "loess",method.args = list(degree = 1,span=1))
+```
+This seems like a reasonably good model. However, this excludes some variables which, according to our previous analysis, should have an impact on the probability of leaving.
+
+Let's try adding satisfaction level and work accident.
+
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+m1<-glm(left ~ last_evaluation + average_montly_hours + factor(salary) + satisfaction_level + Work_accident,
+        family = binomial, 
+        data = HR_Data)
+summary(m1)
+m1.df = HR_Data
+m1.df$.fitted = fitted.values(m1)
+m1.df$.resid = residuals(m1, type = "response")
+ggplot(m1.df, aes(x = .fitted, y = .resid)) + geom_point() + geom_smooth(method = "loess",method.args = list(degree = 1,span=1))
+m1
+```
+This model is bit lower in predictive accuracy than the previous model. However, its AIC value is considerably lower than the previous one. We will further add a few interactions to our model.   
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.align='center',fig.width=10}
+m1<-glm(left ~ last_evaluation + average_montly_hours + factor(salary) + satisfaction_level + time_spend_company : satisfaction_level + time_spend_company + Work_accident + average_montly_hours:satisfaction_level, 
+        family = binomial, 
+        data = HR_Data)
+summary(m1)
+m1.df = HR_Data
+m1.df$.fitted = fitted.values(m1)
+m1.df$.resid = residuals(m1, type = "response")
+ggplot(m1.df, aes(x = .fitted, y = .resid)) + geom_point() + geom_smooth(method = "loess",method.args = list(degree = 1,span=1))
+```
+In this model, we have added a few more interactions(time spent in company:satisfaction level, average monthly hours: satisfaction level). The model gives us a lower AIC value than the previous ones. Also the smooth curve is within 0.3 boundary on either side of the zero-axis. We observe a major deflection from the zero-axis towards the end. This is because our model is trying to predict the probability of left = 1 and there is a sparsity of such data points towards the end.  
+
+## Future Work  
+
+First, we need to collect more data pertaining to the Work accident variable such as type of work accident, compensation or benefits received etc. Such additional data might be useful in conclusively determining why work accident has a counter-intuitive impact on the probability of leaving. Also, it seems from our previous analysis that logistic regression might not be the best predictive model for this data. In that case, a few more machine learning algorithms such as decision trees with ensemble, random forests, support vector machines etc. could be used to improve predictive accuracy.  
